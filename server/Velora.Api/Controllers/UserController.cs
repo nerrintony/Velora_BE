@@ -1,6 +1,10 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
 using Velora.Api.Models;
 using Velora.Database;
 using Velora.Database.Entities;
@@ -12,11 +16,13 @@ namespace Velora.Api.Controllers
     public class UserController : ControllerBase
     {
         private readonly VeloraDbContext _context;
-        private readonly PasswordHasher<RegisterUserRequest> _password_hasher = new();
+        private readonly PasswordHasher<User> _password_hasher = new();
+        private readonly IConfiguration _config;
 
-        public UserController(VeloraDbContext context)
+        public UserController(VeloraDbContext context, IConfiguration config)
         {
             _context = context;
+            _config = config;
         }
 
         [HttpPost("register")]
@@ -40,7 +46,7 @@ namespace Velora.Api.Controllers
                 IsActive = false
             };
 
-            user.Password = _password_hasher.HashPassword(request, request.Password);
+            user.Password = _password_hasher.HashPassword(user, request.Password);
 
             _context.Users.Add(user);
 
@@ -63,5 +69,73 @@ namespace Velora.Api.Controllers
             });
 
         }
+
+        // POST: api/user/login
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] LoginRequest request)
+        {
+            var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.Email == normalizedEmail);
+
+            if (user == null)
+            {
+                return Unauthorized(new { message = "Invalid email or password." });
+            }
+
+            var passwordResult = _password_hasher.VerifyHashedPassword(user, user.Password, request.Password);
+            if (passwordResult == PasswordVerificationResult.Failed)
+            {
+                return Unauthorized(new { message = "Invalid email or password." });
+            }
+
+            if (!user.IsActive)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    message = "Account is inactive."
+                });
+            }
+
+            var token = GenerateJwtToken(user, out var expiresAt);
+
+            return Ok(new
+            {
+                token,
+                expiresAt,
+                user = new
+                {
+                    id = user.Id,
+                    name = user.Name,
+                    email = user.Email
+                }
+            });
+        }
+
+        private string GenerateJwtToken(User user, out DateTime expiresAt)
+        {
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
+            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+            var expiryMinutes = double.Parse(_config["Jwt:ExpiryMinutes"] ?? "60");
+            expiresAt = DateTime.UtcNow.AddMinutes(expiryMinutes);
+
+            var claims = new[]
+            {
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Email, user.Email),
+                new Claim(ClaimTypes.Name, user.Name)
+            };
+
+            var jwt = new JwtSecurityToken(
+                issuer: _config["Jwt:Issuer"],
+                audience: _config["Jwt:Audience"],
+                claims: claims,
+                expires: expiresAt,
+                signingCredentials: creds
+            );
+
+            return new JwtSecurityTokenHandler().WriteToken(jwt);
+        }
     }
 }
+

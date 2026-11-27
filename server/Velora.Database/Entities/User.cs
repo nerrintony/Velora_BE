@@ -18,5 +18,8 @@ namespace Velora.Database.Entities
         public DateTime CreatedDttm { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedDttm { get; set; }
         public Boolean IsActive { get; set; } = false;
+        [MaxLength(128)]
+        public string? VerificationToken { get; set; }
+        public DateTime? VerificationTokenExpiersAt { get; set; }
     }
 }

@@ -54,6 +54,13 @@ namespace Velora.Database.Migrations
                     b.Property<DateTime>("UpdatedDttm")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("VerificationToken")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime?>("VerificationTokenExpiersAt")
+                        .HasColumnType("datetime2");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Email")
